@@ -21,6 +21,8 @@ import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.geom.AffineTransform;
+import java.awt.geom.Point2D;
+import java.awt.geom.Rectangle2D;
 import java.util.function.IntFunction;
 
 /**
@@ -241,15 +243,49 @@ public final class PagedSectionView extends BoxView {
 
     @Override
     public int viewToModel(float x, float y, Shape allocation, Position.Bias[] bias) {
-        Point p = toPoints(x, y, allocation);
-        return super.viewToModel(p.x, p.y, pointsAllocation(), bias);
+        Point2D.Double p = toPoints(x, y, allocation);
+        int pos = super.viewToModel((float) p.x, (float) p.y, pointsAllocation(), bias);
+        return nearestOnRow(pos, p.x);
     }
 
-    private Point toPoints(double x, double y, Shape allocation) {
+    /**
+     * The character boundary on the row of {@code pos} that is closest to x (points). Swing's views find the
+     * offset for a point with whole-pixel glyph widths, while the caret and the painted text use fractional
+     * ones (see {@code PageEditor.getFontMetrics}); this corrects the difference of a character or two
+     * towards the end of a line, using the same measurement as the caret.
+     */
+    private int nearestOnRow(int pos, double x) {
+        Rectangle2D start = caretAt(pos);
+        if (start == null) return pos;
+        double distance = Math.abs(start.getX() - x);
+        int length = getDocument().getLength();
+        for (int step : new int[]{-1, 1}) {
+            for (int next = pos + step; next >= 0 && next <= length; next += step) {
+                Rectangle2D r = caretAt(next);
+                if (r == null || r.getY() != start.getY()) break;
+                double d = Math.abs(r.getX() - x);
+                if (d >= distance) break;
+                distance = d;
+                pos = next;
+            }
+        }
+        return pos;
+    }
+
+    /** The caret rectangle of an offset in points, null if it has none. */
+    private Rectangle2D caretAt(int pos) {
+        try {
+            Shape shape = super.modelToView(pos, pointsAllocation(), Position.Bias.Forward);
+            return shape == null ? null : shape.getBounds2D();
+        } catch (BadLocationException e) {
+            return null;
+        }
+    }
+
+    private Point2D.Double toPoints(double x, double y, Shape allocation) {
         AffineTransform t = toScreen(allocation);
         double zoom = layout.zoom();
-        return new Point((int) Math.round((x - t.getTranslateX()) / zoom),
-                (int) Math.round((y - t.getTranslateY()) / zoom));
+        return new Point2D.Double((x - t.getTranslateX()) / zoom, (y - t.getTranslateY()) / zoom);
     }
 
     /**
@@ -261,14 +297,16 @@ public final class PagedSectionView extends BoxView {
                                          Position.Bias[] biasRet) throws BadLocationException {
         Caret caret = getContainer() instanceof JTextComponent text ? text.getCaret() : null;
         Point magic = caret == null ? null : caret.getMagicCaretPosition();
-        if (magic != null) caret.setMagicCaretPosition(toPoints(magic.x, magic.y, allocation));
+        Point2D.Double column = magic == null ? null : toPoints(magic.x, magic.y, allocation);
+        if (magic != null) caret.setMagicCaretPosition(new Point((int) Math.round(column.x), (int) Math.round(column.y)));
         try {
-            return super.getNextVisualPositionFrom(pos, b, pointsAllocation(), direction, biasRet);
+            int next = super.getNextVisualPositionFrom(pos, b, pointsAllocation(), direction, biasRet);
+            boolean vertical = direction == NORTH || direction == SOUTH;
+            return vertical && column != null && next >= 0 ? nearestOnRow(next, column.x) : next;
         } finally {
             if (magic != null) caret.setMagicCaretPosition(magic);
         }
     }
-
 
     // getChildAllocation stays in points: CompositeView uses it internally to walk into the children.
 

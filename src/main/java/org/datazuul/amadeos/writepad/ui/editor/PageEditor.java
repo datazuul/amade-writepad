@@ -15,6 +15,7 @@ import java.awt.Color;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.Toolkit;
@@ -60,6 +61,17 @@ public final class PageEditor extends JTextPane {
 
     public PageLayout pageLayout() {
         return layout;
+    }
+
+    /**
+     * Metrics in points with fractional advances, the same the zoomed and printed text is painted with.
+     * Swing's text views measure lines, caret positions and clicks with the metrics of their component; with
+     * the default whole-pixel advances every glyph is up to half a point off, and at the end of a line the
+     * caret lands visibly beside the last character.
+     */
+    @Override
+    public FontMetrics getFontMetrics(Font font) {
+        return LayoutMetrics.of(font);
     }
 
     /** Text in the bottom margin of each page (0-based page index), e.g. page numbers. */

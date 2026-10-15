@@ -9,7 +9,9 @@ import org.junit.jupiter.api.Test;
 
 import javax.swing.SwingUtilities;
 import javax.swing.text.BadLocationException;
+import java.awt.Font;
 import java.awt.Point;
+import java.awt.font.FontRenderContext;
 import java.awt.Rectangle;
 import java.lang.reflect.InvocationTargetException;
 
@@ -104,6 +106,46 @@ class PageEditorTest {
                     int hit = editor.viewToModel2D(new Point(r.x + 1, r.y + r.height / 2));
                     assertTrue(Math.abs(hit - offset) <= 1, "zoom " + zoom + ": " + offset + " -> " + hit);
                 }
+            });
+        }
+    }
+
+    /**
+     * The caret at the end of a line sits where the painted text ends: lines are measured with the same
+     * fractional advances they are painted with, not with whole pixels per glyph.
+     */
+    @Test
+    void lineEndCaretMatchesThePaintedText() throws Exception {
+        String line = "Lorem ipsum dolor sit amet, consectetur adipiscing elit.";
+        for (double zoom : new double[]{1, 4.0 / 3, 2}) {
+            onEdt(() -> {
+                layout = new PageLayout(DocumentSettings.DEFAULT, zoom);
+                editor = new PageEditor(layout);
+                try {
+                    editor.getDocument().insertString(0, line, null);
+                } catch (BadLocationException e) {
+                    throw new AssertionError(e);
+                }
+                fit();
+                double measured = (view(line.length()).x - view(0).x) / zoom;
+                Font font = editor.getStyledDocument().getFont(editor.getStyledDocument().getCharacterElement(0)
+                        .getAttributes());
+                double painted = font.getStringBounds(line, new FontRenderContext(null, true, true)).getWidth();
+                assertEquals(painted, measured, 0.75 + 1 / zoom, "zoom " + zoom);
+            });
+        }
+    }
+
+    /** A click right of a paragraph's last line puts the caret after its last character, where Enter splits. */
+    @Test
+    void clickAfterLineEndGoesToTheEndOfTheParagraph() throws Exception {
+        for (double zoom : new double[]{0.5, 1, 4.0 / 3, 2}) {
+            withSample(DocumentSettings.DEFAULT, zoom, () -> {
+                int end = editor.getStyledDocument().getParagraphElement(200).getEndOffset() - 1;
+                Rectangle last = view(end);
+                int right = (int) ((PageLayout.GAP + layout.pageWidth() - layout.right()) * zoom) - 2;
+                int hit = editor.viewToModel2D(new Point(right, last.y + last.height / 2));
+                assertEquals(end, hit, "zoom " + zoom);
             });
         }
     }
